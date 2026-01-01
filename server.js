@@ -14,10 +14,14 @@ app.get("/", (req, res) => {
 server.listen(PORT, () => {
   console.log("Server listening on port", PORT);
 });
-
-const wsServer = new websocketServer({
-  httpServer: server
+const wsServer = new WebSocket.Server({
+  server,
+  path: "/ws"
 });
+const clients = {};
+const games = {};
+let max = 0;
+let amountsAdded = {};
 wsServer.on("request", request => {
     //connect
     const connection = request.accept(null, request.origin);
