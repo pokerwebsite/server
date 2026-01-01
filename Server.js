@@ -25,9 +25,9 @@ const games = {};
 let max = 0;
 let amountsAdded = {};
 wss.on("connection", (connection) => {
-    connection.on("open", () => console.log("opened!"))
     connection.on("close", () => console.log("closed!"))
-    connection.on("message", message => {
+    connection.on("message", (data) => {
+    const result = JSON.parse(data.toString());
         const result = JSON.parse(data.toString());
         //I have received a message from the client
         //a user want to create a new game
