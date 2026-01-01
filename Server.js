@@ -26,10 +26,14 @@ let max = 0;
 let amountsAdded = {};
 wss.on("connection", (connection) => {
     console.log("✅ Client connected");
-    connection.on("close", () => console.log("closed!"))
+    const clientId = guid();
+    clients[clientId] = { connection };
+    connection.on("close", () => {
+    console.log("closed!", clientId);
+    delete clients[clientId];
+    });
     connection.on("message", (data) => {
     const result = JSON.parse(data.toString());
-        const result = JSON.parse(data.toString());
         //I have received a message from the client
         //a user want to create a new game
         if (result.method === "create") {
@@ -465,10 +469,6 @@ wss.on("connection", (connection) => {
     })
 
     //generate a new clientId
-    const clientId = guid();
-    clients[clientId] = {
-        "connection":  connection
-    }
 
     const payLoad = {
         "method": "connect",
