@@ -25,6 +25,7 @@ const games = {};
 let max = 0;
 let amountsAdded = {};
 wss.on("connection", (connection) => {
+    console.log("✅ Client connected");
     connection.on("close", () => console.log("closed!"))
     connection.on("message", (data) => {
     const result = JSON.parse(data.toString());
