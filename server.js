@@ -1,6 +1,6 @@
 const express = require("express");
 const http = require("http");
-const websocketServer = require("websocket").server;
+const WebSocket = require("ws");
 
 const app = express();
 const server = http.createServer(app);
@@ -8,13 +8,15 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 9090;
 
 app.get("/", (req, res) => {
-  res.send("Server running");
+  res.send("Poker server running");
 });
 
 server.listen(PORT, () => {
   console.log("Server listening on port", PORT);
 });
-const wsServer = new WebSocket.Server({
+
+// WebSocket server
+const wss = new WebSocket.Server({
   server,
   path: "/ws"
 });
@@ -22,13 +24,11 @@ const clients = {};
 const games = {};
 let max = 0;
 let amountsAdded = {};
-wsServer.on("request", request => {
-    //connect
-    const connection = request.accept(null, request.origin);
+wss.on("connection", (connection) => {
     connection.on("open", () => console.log("opened!"))
     connection.on("close", () => console.log("closed!"))
     connection.on("message", message => {
-        const result = JSON.parse(message.utf8Data)
+        const result = JSON.parse(data.toString());
         //I have received a message from the client
         //a user want to create a new game
         if (result.method === "create") {
