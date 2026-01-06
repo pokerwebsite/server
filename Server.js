@@ -1,39 +1,26 @@
-const express = require("express");
 const http = require("http");
-const WebSocket = require("ws");
+const app = require("express")();
+app.get("/", (req,res)=> res.sendFile(__dirname + "/index.html"))
 
-const app = express();
-const server = http.createServer(app);
-
-const PORT = process.env.PORT || 9090;
-
-app.get("/", (req, res) => {
-  res.send("Poker server running");
-});
-
-server.listen(PORT, () => {
-  console.log("Server listening on port", PORT);
-});
-
-// WebSocket server
-const wss = new WebSocket.Server({
-  server,
-  path: "/ws"
-});
+app.listen(9091, ()=>console.log("Listening on http port 9091"))
+const websocketServer = require("websocket").server
+const httpServer = http.createServer();
+httpServer.listen(9090, () => console.log("Listening.. on 9090"))
+//hashmap clients
 const clients = {};
 const games = {};
 let max = 0;
 let amountsAdded = {};
-wss.on("connection", (connection) => {
-    console.log("✅ Client connected");
-    const clientId = guid();
-    clients[clientId] = { connection };
-    connection.on("close", () => {
-    console.log("closed!", clientId);
-    delete clients[clientId];
-    });
-    connection.on("message", (data) => {
-    const result = JSON.parse(data.toString());
+const wsServer = new websocketServer({
+    "httpServer": httpServer
+})
+wsServer.on("request", request => {
+    //connect
+    const connection = request.accept(null, request.origin);
+    connection.on("open", () => console.log("opened!"))
+    connection.on("close", () => console.log("closed!"))
+    connection.on("message", message => {
+        const result = JSON.parse(message.utf8Data)
         //I have received a message from the client
         //a user want to create a new game
         if (result.method === "create") {
@@ -76,12 +63,12 @@ wss.on("connection", (connection) => {
             const clientId = result.clientId;
             const gameId = result.gameId;
             const game = games[gameId];
-            if (game.clients.length >= 3) 
+            if (game.clients.length >= 6) 
             {
                 //sorry max players reach
                 return;
             }
-            const color =  {"0": "Red", "1": "Green", "2": "Blue"}[game.clients.length]
+            const color =  {"0": "Red", "1": "Green", "2": "Blue", "3": "Yellow", "4": "Purple", "5": "Orange"}[game.clients.length]
             game.clients.push({
                 "clientId": clientId,
                 "color": color,
@@ -236,7 +223,12 @@ wss.on("connection", (connection) => {
                     }
                 }
                 // announce round advance
-                pushGameMessage(game, 'Advanced to round ' + game.round);
+                const totalRounds = game.totalRounds || 4;
+                if (game.round > totalRounds) {
+                    pushGameMessage(game, 'Advanced to showdown');
+                } else {
+                    pushGameMessage(game, 'Advanced to round ' + game.round);
+                }
                 // if exceeded totalRounds, end the game
                 if (game.round > (game.totalRounds || 4)) {
                     // showdown: determine best hand among non-folded players if more than one remains
@@ -319,7 +311,18 @@ wss.on("connection", (connection) => {
             game.started = true;
             game.ended = false;
             game.round = 1; // start on round 1
-            game.turnIndex = 0;
+            // Set blind indices before setting turnIndex
+            if (typeof game.smallBlindIndex !== 'number'){
+                const creatorIndex = (game.clients || []).findIndex(x => x.clientId === game.creator);
+                game.smallBlindIndex = creatorIndex >= 0 ? creatorIndex : 0;
+            }
+            if (typeof game.bigBlindIndex !== 'number'){
+                const n = (game.clients || []).length || 1;
+                game.bigBlindIndex = (game.smallBlindIndex + 1) % n;
+            }
+            // Start on the person next to the big blind (after small blind)
+            const n = (game.clients || []).length || 1;
+            game.turnIndex = (game.bigBlindIndex + 1) % n;
             game.totalRounds = game.totalRounds || 4;
             game.pot = typeof game.pot === 'number' ? game.pot : 0;
             game.value = game.pot;
@@ -469,6 +472,10 @@ wss.on("connection", (connection) => {
     })
 
     //generate a new clientId
+    const clientId = guid();
+    clients[clientId] = {
+        "connection":  connection
+    }
 
     const payLoad = {
         "method": "connect",
