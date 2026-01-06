@@ -1,25 +1,39 @@
+const express = require("express");
 const http = require("http");
-const app = require("express")();
-app.get("/", (req,res)=> res.sendFile(__dirname + "/index.html"))
+const WebSocket = require("ws");
 
-app.listen(9091, ()=>console.log("Listening on http port 9091"))
-const websocketServer = require("websocket").server
-const httpServer = http.createServer();
-httpServer.listen(9090, () => console.log("Listening.. on 9090"))
-//hashmap clients
+const app = express();
+const server = http.createServer(app);
+
+const PORT = process.env.PORT || 9090;
+
+app.get("/", (req, res) => {
+  res.send("Poker server running");
+});
+
+server.listen(PORT, () => {
+  console.log("Server listening on port", PORT);
+});
+
+// WebSocket server
+const wss = new WebSocket.Server({
+  server,
+  path: "/ws"
+});
 const clients = {};
 const games = {};
 let max = 0;
 let amountsAdded = {};
-const wsServer = new websocketServer({
-    "httpServer": httpServer
-})
-wsServer.on("request", request => {
-    //connect
-    const connection = request.accept(null, request.origin);
-    connection.on("open", () => console.log("opened!"))
-    connection.on("close", () => console.log("closed!"))
-    connection.on("message", message => {
+wss.on("connection", (connection) => {
+    console.log("✅ Client connected");
+    const clientId = guid();
+    clients[clientId] = { connection };
+    connection.on("close", () => {
+    console.log("closed!", clientId);
+    delete clients[clientId];
+    });
+    connection.on("message", (data) => {
+    const result = JSON.parse(data.toString());
         const result = JSON.parse(message.utf8Data)
         //I have received a message from the client
         //a user want to create a new game
@@ -469,8 +483,8 @@ wsServer.on("request", request => {
                 console.error('Error during fold-win check', e);
             }
         }
-    })
 
+    })
     //generate a new clientId
     const clientId = guid();
     clients[clientId] = {
@@ -485,8 +499,6 @@ wsServer.on("request", request => {
     connection.send(JSON.stringify(payLoad))
 
 })
-
-
 function updateGameState(){
 
     //{"gameid", fasdfsf}
