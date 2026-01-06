@@ -484,11 +484,6 @@ wss.on("connection", (connection) => {
         }
 
     })
-    //generate a new clientId
-    const clientId = guid();
-    clients[clientId] = {
-        "connection":  connection
-    }
 
     const payLoad = {
         "method": "connect",
