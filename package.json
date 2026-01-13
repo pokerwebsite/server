@@ -2,18 +2,13 @@
   "name": "poker",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node Server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "type": "commonjs",
   "dependencies": {
     "express": "^5.2.1",
-    "node.js": "^0.0.1-security",
-    "websocket": "^1.0.35",
-    "ws": "^8.18.3"
+    "ws": "^8.16.0"
   }
 }
