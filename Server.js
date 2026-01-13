@@ -33,7 +33,7 @@ wss.on("connection", (connection) => {
     delete clients[clientId];
     });
     connection.on("message", (data) => {
-     const result = JSON.parse(message.utf8Data)
+     const result = JSON.parse(message.toString())
         //I have received a message from the client
         //a user want to create a new game
         if (result.method === "create") {
@@ -519,6 +519,80 @@ wss.on("connection", (connection) => {
                 }
             } catch (e) {
                 console.error('Error during fold-win check', e);
+            }
+        }
+
+        // leave action: remove a player from a game
+        if (result.method === 'leave'){
+            const clientId = result.clientId;
+            const gameId = result.gameId;
+            const game = games[gameId];
+            if (!game) {
+                // still notify the client that they left (best-effort)
+                try { if (clients[clientId] && clients[clientId].connection) clients[clientId].connection.send(JSON.stringify({ method: 'left', clientId })); } catch(e){}
+                return;
+            }
+            // find player index
+            let idx = -1;
+            for (let i=0;i<game.clients.length;i++){
+                if (game.clients[i].clientId === clientId){ idx = i; break; }
+            }
+            if (idx === -1) {
+                try { if (clients[clientId] && clients[clientId].connection) clients[clientId].connection.send(JSON.stringify({ method: 'left', clientId })); } catch(e){}
+                return; // not in game
+            }
+            const player = game.clients[idx];
+            const pName = (player && player.name) ? player.name : clientId;
+            // remove from clients list
+            game.clients.splice(idx, 1);
+            // cleanup per-client state
+            try { delete amountsAdded[clientId]; } catch(e){}
+            try { if (game.privateHands) delete game.privateHands[clientId]; } catch(e){}
+            pushGameMessage(game, pName + ' left the game');
+
+            // notify the leaving client that they have left
+            try {
+                const conn = clients[clientId] && clients[clientId].connection;
+                if (conn) conn.send(JSON.stringify({ method: 'left', clientId }));
+            } catch (e) { /* best-effort notify */ }
+
+            // adjust turnIndex if necessary
+            if (typeof game.turnIndex === 'number'){
+                if (idx < game.turnIndex) {
+                    game.turnIndex = Math.max(0, game.turnIndex - 1);
+                } else if (idx === game.turnIndex) {
+                    // advance to next active player
+                    advanceToNextPlayer(game);
+                }
+            }
+
+            // if only one active player remains, award pot
+            try {
+                const activePlayers = (game.clients || []).filter(p => !p.folded);
+                if (activePlayers.length === 1 && game.pot && game.pot > 0) {
+                    const winner = activePlayers[0];
+                    const winnerId = winner.clientId;
+                    if (!game.chips) game.chips = {};
+                    game.chips[winnerId] = (typeof game.chips[winnerId] === 'number' ? game.chips[winnerId] : 0) + (game.pot || 0);
+                    pushGameMessage(game, (winner.name || winnerId) + ' wins the pot of ' + (game.pot || 0) + ' chips');
+                    game.pot = 0; game.value = 0;
+                    game.ended = true; game.started = false;
+                    scheduleRestartIfNeeded(game.id);
+                }
+            } catch (e) { console.error('Leave winner check error', e); }
+
+            // if no clients left, remove game entirely
+            if (!game.clients || game.clients.length === 0) {
+                delete games[gameId];
+            } else {
+                // broadcast updated game state to remaining clients
+                try {
+                    enrichGame(game);
+                    const payload = { method: 'update', game: game, gameId };
+                    (game.clients || []).forEach(c => {
+                        if (clients[c.clientId] && clients[c.clientId].connection) clients[c.clientId].connection.send(JSON.stringify(payload));
+                    });
+                } catch (e) { console.error('Leave broadcast error', e); }
             }
         }
             })
