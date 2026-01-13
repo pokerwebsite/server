@@ -33,7 +33,7 @@ wss.on("connection", (connection) => {
     delete clients[clientId];
     });
     connection.on("message", (data) => {
-    const result = JSON.parse(data.toString());
+     const result = JSON.parse(message.utf8Data)
         //I have received a message from the client
         //a user want to create a new game
         if (result.method === "create") {
@@ -251,11 +251,19 @@ wss.on("connection", (connection) => {
                             const hands = active.map(p => ({ id: p.clientId, name: p.name || p.clientId }));
                             const community = Array.isArray(game.community) ? game.community.slice() : [];
                             const scores = {};
+                            // prepare a showdown details object to send to clients
+                            game.showdown = { players: {} };
                             hands.forEach(h => {
                                 const priv = (game.privateHands && game.privateHands[h.id]) || [];
                                 const all = priv.concat(community);
                                 const best = bestHandScore(all);
                                 scores[h.id] = best;
+                                // include private hand and human-readable best hand text for client display
+                                try {
+                                    game.showdown.players[h.id] = { private: priv.slice(), bestText: scoreToText(best) };
+                                } catch (e) {
+                                    game.showdown.players[h.id] = { private: priv.slice(), bestText: 'Hand' };
+                                }
                             });
                             // find best score
                             let bestIdList = [];
@@ -302,9 +310,217 @@ wss.on("connection", (connection) => {
                 gameId: gameId
             };
             // ensure derived fields are included
+            // restart turn timer for the new current player
+            startTurnTimer(game);
             enrichGame(game);
             game.clients.forEach(c => {
                 clients[c.clientId].connection.send(JSON.stringify(payLoad))
+            })
+        }else{
+            const payLoad = {
+            method: 'error',
+            error: "insufficient add",
+            amountadded: amountsAdded[clientId],
+            }
+            clients[clientId].connection.send(JSON.stringify(payLoad))
+        }
+        }
+        // start the game (only creator can start)
+        if (result.method === "start") {
+            const gameId = result.gameId;
+            const game = games[gameId];
+            if (!game) return;
+            if (game.creator !== result.clientId) return; // only creator
+            game.started = true;
+            game.ended = false;
+            game.round = 1; // start on round 1
+            // Set blind indices before setting turnIndex
+            if (typeof game.smallBlindIndex !== 'number'){
+                const creatorIndex = (game.clients || []).findIndex(x => x.clientId === game.creator);
+                game.smallBlindIndex = creatorIndex >= 0 ? creatorIndex : 0;
+            }
+            if (typeof game.bigBlindIndex !== 'number'){
+                const n = (game.clients || []).length || 1;
+                game.bigBlindIndex = (game.smallBlindIndex + 1) % n;
+            }
+            // Start on the person next to the big blind (after small blind)
+            const n = (game.clients || []).length || 1;
+            game.turnIndex = (game.bigBlindIndex + 1) % n;
+            // start timer for current player
+            startTurnTimer(game);
+            game.totalRounds = game.totalRounds || 4;
+            game.pot = typeof game.pot === 'number' ? game.pot : 0;
+            game.value = game.pot;
+            // broadcast start to all clients so UI can update
+            const payLoad = {
+                method: 'start',
+                game: game,
+                gameId: gameId
+            };
+            // deal two cards to each player from a standard deck
+            // build deck
+            const suits = ['S','H','D','C'];
+            const ranks = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+            let deck = [];
+            suits.forEach(s => ranks.forEach(r => deck.push(r + s)));
+            // shuffle
+            for (let i = deck.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [deck[i], deck[j]] = [deck[j], deck[i]];
+            }
+            // allocate private hands map and store remaining deck and empty community
+            game.privateHands = {};
+            (game.clients || []).forEach(c => {
+                const card1 = deck.pop();
+                const card2 = deck.pop();
+                game.privateHands[c.clientId] = [card1, card2];
+            });
+            // initialize chips for each player at game start if not already present
+            game.chips = game.chips || {};
+            (game.clients || []).forEach(c => { if (c && c.clientId && typeof game.chips[c.clientId] !== 'number') game.chips[c.clientId] = 100; });
+            // assign blinds indices if not present: creator as small blind, next as big blind
+            if (typeof game.smallBlindIndex !== 'number'){
+                const creatorIndex = (game.clients || []).findIndex(x => x.clientId === game.creator);
+                game.smallBlindIndex = creatorIndex >= 0 ? creatorIndex : 0;
+            }
+            if (typeof game.bigBlindIndex !== 'number'){
+                const n = (game.clients || []).length || 1;
+                game.bigBlindIndex = (game.smallBlindIndex + 1) % n;
+            }
+            // place blinds immediately for round 1
+            if (game.round === 1){
+                const sbIdx = game.smallBlindIndex;
+                const bbIdx = game.bigBlindIndex;
+                const sbPlayer = (game.clients || [])[sbIdx];
+                const bbPlayer = (game.clients || [])[bbIdx];
+                const smallAmt = 2;
+                const bigAmt = 5;
+                // ensure amountsAdded entries
+                if (sbPlayer && sbPlayer.clientId){ amountsAdded[sbPlayer.clientId] = amountsAdded[sbPlayer.clientId] || 0; }
+                if (bbPlayer && bbPlayer.clientId){ amountsAdded[bbPlayer.clientId] = amountsAdded[bbPlayer.clientId] || 0; }
+                // deduct from chips and add to pot
+                if (sbPlayer && sbPlayer.clientId){
+                    const id = sbPlayer.clientId;
+                    const avail = (game.chips && typeof game.chips[id] === 'number') ? game.chips[id] : 0;
+                    const put = Math.min(avail, smallAmt);
+                    game.chips[id] = Math.max(0, avail - put);
+                    amountsAdded[id] = (amountsAdded[id] || 0) + put;
+                    game.pot = (typeof game.pot === 'number' ? game.pot : 0) + put;
+                    pushGameMessage(game, (sbPlayer.name || id) + ' posts small blind of ' + put + ' chips');
+                }
+                if (bbPlayer && bbPlayer.clientId){
+                    const id = bbPlayer.clientId;
+                    const avail = (game.chips && typeof game.chips[id] === 'number') ? game.chips[id] : 0;
+                    const put = Math.min(avail, bigAmt);
+                    game.chips[id] = Math.max(0, avail - put);
+                    amountsAdded[id] = (amountsAdded[id] || 0) + put;
+                    game.pot = (typeof game.pot === 'number' ? game.pot : 0) + put;
+                    pushGameMessage(game, (bbPlayer.name || id) + ' posts big blind of ' + put + ' chips');
+                }
+                // update game.max to reflect highest posted blind
+                const postedMax = Math.max(
+                    (sbPlayer && amountsAdded[sbPlayer.clientId]) || 0,
+                    (bbPlayer && amountsAdded[bbPlayer.clientId]) || 0,
+                    game.max || 0
+                );
+                game.max = postedMax;
+                game.value = game.pot;
+                // broadcast one update immediately so clients see the blinds/pot/amountsAdded before the start flow completes
+                try {
+                    enrichGame(game);
+                    // also emit 'add' events for blinds so clients can animate/add accordingly
+                    const updatePayload = { method: 'update', game: game, gameId: game.id };
+                    (game.clients || []).forEach(c => {
+                        if (clients[c.clientId] && clients[c.clientId].connection) clients[c.clientId].connection.send(JSON.stringify(updatePayload));
+                    });
+                    try {
+                        if (sbPlayer && sbPlayer.clientId) {
+                            const addPayload = { method: 'add', game: game, gameId: game.id, clientId: sbPlayer.clientId, value: (amountsAdded[sbPlayer.clientId] || 0) };
+                            (game.clients || []).forEach(c => { if (clients[c.clientId] && clients[c.clientId].connection) clients[c.clientId].connection.send(JSON.stringify(addPayload)); });
+                        }
+                        if (bbPlayer && bbPlayer.clientId) {
+                            const addPayload = { method: 'add', game: game, gameId: game.id, clientId: bbPlayer.clientId, value: (amountsAdded[bbPlayer.clientId] || 0) };
+                            (game.clients || []).forEach(c => { if (clients[c.clientId] && clients[c.clientId].connection) clients[c.clientId].connection.send(JSON.stringify(addPayload)); });
+                        }
+                    } catch(e) { /* best-effort */ }
+                } catch (e) {
+                    console.error('Error broadcasting blinds update', e);
+                }
+            }
+            game.deck = deck; // remaining deck for community
+            game.community = [];
+
+            // include current turn username for UI
+            enrichGame(game);
+            // announce start
+            pushGameMessage(game, 'game started');
+
+            // send start to each client, embedding that client's private hand
+            (game.clients || []).forEach(c => {
+                const con = clients[c.clientId] && clients[c.clientId].connection;
+                if (!con) return;
+                const personalPayload = Object.assign({}, payLoad);
+                personalPayload.privateHand = game.privateHands[c.clientId] || [];
+                con.send(JSON.stringify(personalPayload));
+            });
+        }
+
+        // fold action
+        if (result.method === 'fold'){
+            const clientId = result.clientId;
+            const gameId = result.gameId;
+            const game = games[gameId];
+            if (!game) return;
+            // mark player as folded
+            for (let i=0;i<game.clients.length;i++){
+                if (game.clients[i].clientId === clientId){
+                    game.clients[i].folded = true;
+                    const pName = game.clients[i].name || clientId;
+                    pushGameMessage(game, pName + ' folded');
+                    // if the folded player was the current player, advance turn and start timer for next
+                    const currentIndex = typeof game.turnIndex === 'number' ? game.turnIndex : 0;
+                    const currentPlayer = (game.clients || [])[currentIndex];
+                    if (currentPlayer && currentPlayer.clientId === clientId) {
+                        advanceToNextPlayer(game);
+                    }
+                    break;
+                }
+            }
+            // broadcast update
+            const payLoad = { method: 'update', game: game, gameId };
+            enrichGame(game);
+            game.clients.forEach(c => {
+                clients[c.clientId].connection.send(JSON.stringify(payLoad))
+            })
+            // check if only one player remains (everyone else folded) -> award pot
+            try {
+                const activePlayers = (game.clients || []).filter(p => !p.folded);
+                if (activePlayers.length === 1) {
+                    const winner = activePlayers[0];
+                    const winnerId = winner.clientId;
+                    const winnerName = winner.name || winnerId;
+                    const potAmount = typeof game.pot === 'number' ? game.pot : 0;
+                    if (!game.chips) game.chips = {};
+                    game.chips[winnerId] = (typeof game.chips[winnerId] === 'number' ? game.chips[winnerId] : 0) + potAmount;
+                    // announce winner and clear pot
+                    pushGameMessage(game, winnerName + ' wins the pot of ' + potAmount + ' chips');
+                    game.pot = 0;
+                    game.value = 0;
+                    // broadcast final update showing winner and updated chips
+                    const finalPayload = { method: 'update', game: game, gameId };
+                    enrichGame(game);
+                    game.clients.forEach(c => {
+                        if (clients[c.clientId] && clients[c.clientId].connection) clients[c.clientId].connection.send(JSON.stringify(finalPayload));
+                    });
+                    // end and schedule restart
+                    game.ended = true;
+                    game.started = false;
+                    scheduleRestartIfNeeded(game.id);
+                }
+            } catch (e) {
+                console.error('Error during fold-win check', e);
+            }
+        }
             })
         }else{
             const payLoad = {
@@ -493,11 +709,27 @@ wss.on("connection", (connection) => {
     connection.send(JSON.stringify(payLoad))
 
 })
+
+
 function updateGameState(){
 
     //{"gameid", fasdfsf}
     for (const g of Object.keys(games)) {
         const game = games[g]
+        // server-side: auto-fold on turn timeout
+        try {
+            if (game && game.turnTimerExpires && Date.now() > game.turnTimerExpires) {
+                const owner = game.turnTimerOwner;
+                if (owner) {
+                    // mark owner as folded due to timeout and advance turn
+                    autoFoldPlayer(game, owner);
+                    advanceToNextPlayer(game);
+                }
+                // clear timer
+                game.turnTimerExpires = null;
+                game.turnTimerOwner = null;
+            }
+        } catch (e) { console.error('Timer check error', e); }
         const payLoad = {
             "method": "update",
             "game": game
@@ -615,6 +847,28 @@ function restartGame(gameId){
         const postedMax = Math.max(...(game.clients.map(c => (c && c.clientId) ? (amountsAdded[c.clientId] || 0) : 0)), game.max || 0);
         game.max = postedMax;
         game.value = game.pot;
+        // broadcast an immediate update so clients see blinds/pot before the restart start payloads
+        try {
+            enrichGame(game);
+            const updatePayload = { method: 'update', game: game, gameId };
+            (game.clients || []).forEach(c => {
+                if (clients[c.clientId] && clients[c.clientId].connection) clients[c.clientId].connection.send(JSON.stringify(updatePayload));
+            });
+            try {
+                if (sbPlayer && sbPlayer.clientId) {
+                    const addPayload = { method: 'add', game: game, gameId, clientId: sbPlayer.clientId, value: (amountsAdded[sbPlayer.clientId] || 0) };
+                    (game.clients || []).forEach(c => { if (clients[c.clientId] && clients[c.clientId].connection) clients[c.clientId].connection.send(JSON.stringify(addPayload)); });
+                }
+                if (bbPlayer && bbPlayer.clientId) {
+                    const addPayload = { method: 'add', game: game, gameId, clientId: bbPlayer.clientId, value: (amountsAdded[bbPlayer.clientId] || 0) };
+                    (game.clients || []).forEach(c => { if (clients[c.clientId] && clients[c.clientId].connection) clients[c.clientId].connection.send(JSON.stringify(addPayload)); });
+                }
+            } catch(e) { }
+        } catch (e) {
+            console.error('Error broadcasting blinds update on restart', e);
+        }
+        // start timer for the first player after restart
+        try { startTurnTimer(game); } catch (e) { }
     }
     // announce restart
     pushGameMessage(game, 'new game starting');
@@ -644,6 +898,8 @@ function enrichGame(game){
         if (p && typeof p.name === 'string') name = p.name;
     }
     game.currentTurnName = name;
+    // provide a simple `turn` field for clients to read (human name)
+    game.turn = name;
     // attach per-client added amounts so clients can show how much they've added
     game.amountsAdded = {};
     if (Array.isArray(game.clients)){
@@ -656,6 +912,16 @@ function enrichGame(game){
     game.chips = game.chips || {};
     // ensure messages array exists so chat/history can be shown to clients
     game.messages = Array.isArray(game.messages) ? game.messages : [];
+    // include turn timer info for clients
+    // only reveal timer info to clients when the game has started
+    if (game.started && game && game.turnTimerExpires && typeof game.turnTimerExpires === 'number'){
+        const remainingMs = Math.max(0, game.turnTimerExpires - Date.now());
+        game.turnTimerRemaining = Math.ceil(remainingMs / 1000);
+        game.turnTimerOwner = game.turnTimerOwner || null;
+    } else {
+        game.turnTimerRemaining = 0;
+        game.turnTimerOwner = null;
+    }
     return game;
 }
 
@@ -665,6 +931,104 @@ function pushGameMessage(game, text){
     game.messages = Array.isArray(game.messages) ? game.messages : [];
     const now = new Date().toISOString();
     game.messages.push({ text, time: now });
+}
+
+// Start a 60s timer for the current turn owner
+function startTurnTimer(game){
+    // Only start timers for active, started games
+    if (!game) return;
+    if (!game.started || !Array.isArray(game.clients) || game.clients.length === 0) {
+        // ensure no timer is visible/active before game start
+        game.turnTimerExpires = null;
+        game.turnTimerOwner = null;
+        return;
+    }
+    const n = game.clients.length;
+    // ensure turnIndex is valid
+    let ti = (typeof game.turnIndex === 'number') ? game.turnIndex : 0;
+    ti = ((ti % n) + n) % n;
+    // find next non-folded player starting from turnIndex
+    let attempts = 0;
+    while (attempts < n && game.clients[ti] && game.clients[ti].folded) {
+        ti = (ti + 1) % n;
+        attempts += 1;
+    }
+    if (attempts >= n) {
+        // no active players
+        game.turnTimerExpires = null;
+        game.turnTimerOwner = null;
+        return;
+    }
+    // update turnIndex to the resolved active player
+    game.turnIndex = ti;
+    const p = game.clients[ti];
+    if (!p || !p.clientId) { game.turnTimerExpires = null; game.turnTimerOwner = null; return; }
+    game.turnTimerOwner = p.clientId;
+    game.turnTimerExpires = Date.now() + 60000; // 60 seconds
+}
+
+function clearTurnTimer(game){
+    if (!game) return;
+    game.turnTimerExpires = null;
+    game.turnTimerOwner = null;
+}
+
+function advanceToNextPlayer(game){
+    if (!game || !Array.isArray(game.clients) || game.clients.length === 0) return;
+    const n = game.clients.length;
+    let next = (typeof game.turnIndex === 'number') ? (game.turnIndex + 1) % n : 0;
+    let attempts = 0;
+    while (attempts < n && game.clients[next] && game.clients[next].folded) {
+        next = (next + 1) % n;
+        attempts++;
+    }
+    if (attempts >= n) return; // no active players
+    game.turnIndex = next;
+    startTurnTimer(game);
+}
+
+function autoFoldPlayer(game, clientId){
+    if (!game || !clientId) return;
+    for (let i=0;i<game.clients.length;i++){
+        if (game.clients[i].clientId === clientId){
+            game.clients[i].folded = true;
+            const pName = game.clients[i].name || clientId;
+            pushGameMessage(game, pName + ' folded (timeout)');
+            break;
+        }
+    }
+    // broadcast update
+    try {
+        enrichGame(game);
+        const payload = { method: 'update', game: game, gameId: game.id };
+        (game.clients || []).forEach(c => {
+            if (clients[c.clientId] && clients[c.clientId].connection) clients[c.clientId].connection.send(JSON.stringify(payload));
+        });
+    } catch (e) { console.error('autoFold broadcast error', e); }
+
+    // check if only one player remains
+    try {
+        const activePlayers = (game.clients || []).filter(p => !p.folded);
+        if (activePlayers.length === 1) {
+            const winner = activePlayers[0];
+            const winnerId = winner.clientId;
+            const winnerName = winner.name || winnerId;
+            const potAmount = typeof game.pot === 'number' ? game.pot : 0;
+            if (!game.chips) game.chips = {};
+            game.chips[winnerId] = (typeof game.chips[winnerId] === 'number' ? game.chips[winnerId] : 0) + potAmount;
+            pushGameMessage(game, winnerName + ' wins the pot of ' + potAmount + ' chips');
+            game.pot = 0;
+            game.value = 0;
+            const finalPayload = { method: 'update', game: game, gameId: game.id };
+            enrichGame(game);
+            (game.clients || []).forEach(c => {
+                if (clients[c.clientId] && clients[c.clientId].connection) clients[c.clientId].connection.send(JSON.stringify(finalPayload));
+            });
+            game.ended = true;
+            game.started = false;
+            scheduleRestartIfNeeded(game.id);
+        }
+    } catch (e) { console.error('autoFold winner check error', e); }
 }
 
 // ----- Poker hand evaluation helpers -----
@@ -791,3 +1155,34 @@ function scoreFive(cards){
     // high card
     return [1].concat(ranks);
 }
+
+function rankName(n){
+    if (n === 14) return 'A';
+    if (n === 13) return 'K';
+    if (n === 12) return 'Q';
+    if (n === 11) return 'J';
+    return String(n);
+}
+
+function scoreToText(score){
+    if (!score || !Array.isArray(score)) return 'Unknown';
+    const cat = score[0];
+    const names = {9:'Straight Flush',8:'Four of a Kind',7:'Full House',6:'Flush',5:'Straight',4:'Three of a Kind',3:'Two Pair',2:'One Pair',1:'High Card'};
+    let text = names[cat] || 'Hand';
+    try{
+        if (cat === 9 || cat === 5) { if (score[1]) text += ' ' + rankName(score[1]); }
+        else if (cat === 8) { if (score[1]) text += ' ' + rankName(score[1]); }
+        else if (cat === 7) { if (score[1] && score[2]) text += ' ' + rankName(score[1]) + ' over ' + rankName(score[2]); }
+        else if (cat === 6) { if (score.length>1) text += ' ' + score.slice(1,5).map(rankName).join(','); }
+        else if (cat === 4) { if (score[1]) text += ' ' + rankName(score[1]); }
+        else if (cat === 3) { if (score[1] && score[2]) text += ' ' + rankName(score[1]) + ' & ' + rankName(score[2]); }
+        else if (cat === 2) { if (score[1]) text += ' ' + rankName(score[1]); }
+        else if (cat === 1) { if (score.length>1) text += ' ' + score.slice(1,6).map(rankName).join(','); }
+    } catch(e){ }
+    return text;
+}
+
+// start periodic server update loop
+try {
+    updateGameState();
+} catch (e) { console.error('Failed to start updateGameState loop', e); }
