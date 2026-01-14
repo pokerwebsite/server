@@ -10,11 +10,12 @@ const PORT = process.env.PORT || 9090;
 app.get("/", (req, res) => {
   res.send("Poker server running");
 });
-
 server.listen(PORT, () => {
   console.log("Server listening on port", PORT);
 });
-
+app.get("/health", (req, res) => {
+  res.status(200).send("OK");
+});
 // WebSocket server
 const wss = new WebSocket.Server({
   server,
