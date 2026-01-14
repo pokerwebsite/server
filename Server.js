@@ -38,6 +38,7 @@ wss.on("connection", (connection) => {
         //I have received a message from the client
         //a user want to create a new game
         if (result.method === "create") {
+            console.log("aight we got it")
             const clientId = result.clientId;
             const gameId = guid1();
             games[gameId] = {
@@ -66,9 +67,11 @@ wss.on("connection", (connection) => {
                 "method": "create",
                 "game" : games[gameId]
             }
-
+            console.log("trynaconnect")
             const con = clients[clientId].connection;
+            console.log("connected, tryna send")
             con.send(JSON.stringify(payLoad));
+            console.log("sent hopefully")
         }
 
         //a client want to join
