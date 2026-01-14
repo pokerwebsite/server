@@ -33,7 +33,7 @@ wss.on("connection", (connection) => {
     delete clients[clientId];
     });
     connection.on("message", (data) => {
-     const result = JSON.parse(message.toString())
+     const result = JSON.parse(data.toString())
         //I have received a message from the client
         //a user want to create a new game
         if (result.method === "create") {
