@@ -35,6 +35,7 @@ wss.on("connection", (connection) => {
     });
     connection.on("message", (data) => {
      const result = JSON.parse(data.toString())
+      console.log("i got summ")
         //I have received a message from the client
         //a user want to create a new game
         if (result.method === "create") {
