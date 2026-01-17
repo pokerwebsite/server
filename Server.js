@@ -40,7 +40,7 @@ wss.on("connection", (connection) => {
       console.log("i got summ")
         //I have received a message from the client
         //a user want to create a new game
-        if (result.method === "create") {
+        if (result.method == "create") {
             console.log("aight we got it")
             const clientId = connection.clientId;
             const gameId = guid1();
