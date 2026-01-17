@@ -37,7 +37,8 @@ wss.on("connection", (connection) => {
     
     connection.on("message", (data) => {
       try{
-     const result = JSON.parse(data.toString())
+      const str = data.toString();        // convert Buffer → string
+      const result = JSON.parse(str); 
       console.log("i got summ")
         console.log(data.toString())
         console.log(result)
