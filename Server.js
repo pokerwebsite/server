@@ -34,11 +34,13 @@ wss.on("connection", (connection) => {
     console.log("closed!", clientId);
     delete clients[clientId];
     });
-    console.log(result.method)
+    
     connection.on("message", (data) => {
       try{
      const result = JSON.parse(data.toString())
       console.log("i got summ")
+        console.log(result.method)
+        console.log(typeof result.method)
         //I have received a message from the client
         //a user want to create a new game
         if (result.method == "create") {
