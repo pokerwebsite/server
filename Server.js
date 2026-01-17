@@ -34,6 +34,7 @@ wss.on("connection", (connection) => {
     console.log("closed!", clientId);
     delete clients[clientId];
     });
+    console.log(result.method)
     connection.on("message", (data) => {
       try{
      const result = JSON.parse(data.toString())
