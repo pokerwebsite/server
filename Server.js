@@ -28,19 +28,21 @@ let amountsAdded = {};
 wss.on("connection", (connection) => {
     console.log("✅ Client connected");
     const clientId = guid();
+    connection.clientId = clientId;
     clients[clientId] = { connection };
     connection.on("close", () => {
     console.log("closed!", clientId);
     delete clients[clientId];
     });
     connection.on("message", (data) => {
+      try{
      const result = JSON.parse(data.toString())
       console.log("i got summ")
         //I have received a message from the client
         //a user want to create a new game
         if (result.method === "create") {
             console.log("aight we got it")
-            const clientId = result.clientId;
+            const clientId = connection.clientId;
             const gameId = guid1();
             games[gameId] = {
                 "id": gameId,
@@ -600,6 +602,9 @@ wss.on("connection", (connection) => {
                 } catch (e) { console.error('Leave broadcast error', e); }
             }
         }
+      } catch (e) {
+        console.error("WebSocket handler error:", e);
+    }
     })
 
     const payLoad = {
