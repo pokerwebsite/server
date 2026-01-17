@@ -39,6 +39,8 @@ wss.on("connection", (connection) => {
       try{
      const result = JSON.parse(data.toString())
       console.log("i got summ")
+        console.log(data.toString())
+        console.log(result)
         console.log(result.method)
         console.log(typeof result.method)
         //I have received a message from the client
