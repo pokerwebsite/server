@@ -45,9 +45,9 @@ wss.on("connection", (connection) => {
         console.log(result.clientId)
         console.log(result.method)
         console.log(typeof result.method)
-        xconst raw = data.toString();
+        xconst raw1 = data.toString();
 
-        const match = raw.match(/"method"\s*:\s*"([^"]+)"/);
+        const match = raw1.match(/"method"\s*:\s*"([^"]+)"/);
         const method = match ? match[1] : null;
 
         console.log("METHOD (regex):", method);
