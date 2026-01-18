@@ -44,6 +44,7 @@ wss.on("connection", (connection) => {
         console.log(result)
         console.log(result.clientId)
         console.log(result.method)
+        console.log(extractMethod(data.toString()));
        const raw = data.toString();
 
       let method = null;
@@ -1105,7 +1106,17 @@ function scoreToText(score){
     } catch(e){ }
     return text;
 }
+function extractMethod(str) {
+  const marker = '"method":"';
+  const start = str.indexOf(marker);
+  if (start === -1) return null;
 
+  const valueStart = start + marker.length;
+  const valueEnd = str.indexOf('"', valueStart);
+  if (valueEnd === -1) return null;
+
+  return str.slice(valueStart, valueEnd);
+}
 // start periodic server update loop
 try {
     updateGameState();
