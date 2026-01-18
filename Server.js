@@ -44,15 +44,18 @@ wss.on("connection", (connection) => {
         console.log(result)
         console.log(result.clientId)
         console.log(result.method)
-        console.log(typeof result.method)
-        const raw1 = data.toString();
+       const raw = data.toString();
 
-        const match = raw1.match(/"method"\s*:\s*"([^"]+)"/);
-        const method = match ? match[1] : null;
+      let method = null;
 
-        console.log("METHOD (regex):", method);
-        console.log("RAW:", data.toString());
-        console.log("METHOD:", result["method"]);
+      for (const [k, v] of Object.entries(JSON.parse(raw))) {
+  if (k.toLowerCase().includes("method")) {
+    method = v;
+    break;
+  }
+}
+
+console.log("METHOD (nuclear):", method);
         //I have received a message from the client
         //a user want to create a new game
         if (result.method == "create") {
