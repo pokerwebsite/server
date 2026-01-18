@@ -42,6 +42,7 @@ wss.on("connection", (connection) => {
       console.log("i got summ")
         console.log(data.toString())
         console.log(result)
+        console.log(typeof result)
         console.log(result.clientId)
         console.log(result.method)
         console.log(extractMethod(data.toString()));
