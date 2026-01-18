@@ -45,6 +45,12 @@ wss.on("connection", (connection) => {
         console.log(result.clientId)
         console.log(result.method)
         console.log(typeof result.method)
+        xconst raw = data.toString();
+
+        const match = raw.match(/"method"\s*:\s*"([^"]+)"/);
+        const method = match ? match[1] : null;
+
+        console.log("METHOD (regex):", method);
         //I have received a message from the client
         //a user want to create a new game
         if (result.method == "create") {
