@@ -37,27 +37,12 @@ wss.on("connection", (connection) => {
     
     connection.on("message", (data) => {
       try{
-      const str = data.toString();        // convert Buffer → string
-      const result = JSON.parse(str); 
-      console.log("i got summ")
-        console.log(data.toString())
+          result = parseWSMessage(data)
         console.log(result)
         console.log(typeof result)
-        console.log(result.clientId)
         console.log(result.method)
-        console.log(extractMethod(data.toString()));
-       const raw = data.toString();
-
-      let method = null;
-
-      for (const [k, v] of Object.entries(JSON.parse(raw))) {
-  if (k.toLowerCase().includes("method")) {
-    method = v;
-    break;
-  }
-}
-
-console.log("METHOD (nuclear):", method);
+        // convert Buffer → string
+      console.log("i got summ")
         //I have received a message from the client
         //a user want to create a new game
         if (result.method == "create") {
@@ -1118,6 +1103,20 @@ function extractMethod(str) {
 
   return str.slice(valueStart, valueEnd);
 }
+function parseWSMessage(data) {
+  let msg = data.toString();
+
+  // First parse
+  let parsed = JSON.parse(msg);
+
+  // If still a string, parse again
+  if (typeof parsed === "string") {
+    parsed = JSON.parse(parsed);
+  }
+
+  return parsed;
+}
+
 // start periodic server update loop
 try {
     updateGameState();
